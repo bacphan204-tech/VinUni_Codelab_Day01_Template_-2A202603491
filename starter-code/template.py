@@ -65,9 +65,41 @@ def call_openai(
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         # response.usage contains input_tokens and output_tokens (prompt_tokens/completion_tokens)
     """
-    # TODO: Import OpenAI, instantiate client, call chat.completions.create with parameters,
-    #       measure execution start/end time, extract text and token usage, and return them.
-    raise NotImplementedError("Implement call_openai")
+    # 
+    from openai import OpenAI
+
+    # Khởi tạo OpenAI Client
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    # Bắt đầu đo thời gian
+    start = time.perf_counter()
+
+    # Gửi yêu cầu đến OpenAI
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens
+    )
+
+    # Tính thời gian phản hồi
+    latency = float(time.perf_counter() - start)
+
+    # Lấy nội dung AI trả lời
+    response_text = response.choices[0].message.content or ""
+
+    # Lấy số token
+    usage = {
+        "input_tokens": response.usage.prompt_tokens,
+        "output_tokens": response.usage.completion_tokens
+    }
+
+    # Trả về kết quả
+    return response_text, latency, usage
+
 
 
 # ---------------------------------------------------------------------------
@@ -113,9 +145,47 @@ def call_gemini(
         Ensure your usage dictionary extracts 'input_tokens' and 'output_tokens' 
         from the response metadata (e.g. response.usage_metadata).
     """
-    # TODO: Initialize Gemini client, set config parameters, call generate_content,
-    #       measure latency, extract response text and usage metadata, and return the tuple.
-    raise NotImplementedError("Implement call_gemini")
+    
+    from google import genai
+    from google.genai import types
+
+    # 1. Khoi tao Gemini Client
+    client = genai.Client(
+        api_key=os.getenv("GEMINI_API_KEY")
+    )
+
+    # 2. Cau hinh tham so cho model
+    config = types.GenerateContentConfig(
+        temperature=temperature,
+        top_p=top_p,
+        max_output_tokens=max_tokens
+    )
+
+    # 3. Bat dau do thoi gian
+    start = time.perf_counter()
+
+    # 4. Goi Gemini API
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=config
+    )
+
+    # 5. Tinh thoi gian phan hoi
+    latency = float(time.perf_counter() - start)
+
+    # 6. Lay noi dung phan hoi
+    response_text = response.text or ""
+
+    # 7. Lay thong tin token
+    usage = {
+        "input_tokens": response.usage_metadata.prompt_token_count,
+        "output_tokens": response.usage_metadata.candidates_token_count
+    }
+
+    # 8. Tra ve ket qua
+    return response_text, latency, usage
+
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +220,45 @@ def call_anthropic(
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         # response.usage contains input_tokens and output_tokens
     """
-    # TODO: Initialize Anthropic client, create message, measure latency,
-    #       extract content text and usage statistics, and return the tuple.
-    raise NotImplementedError("Implement call_anthropic")
+    
+    import anthropic
+
+    # 1. Khoi tao Anthropic Client
+    client = anthropic.Anthropic(
+        api_key=os.getenv("ANTHROPIC_API_KEY")
+    )
+
+    # 2. Bat dau do thoi gian
+    start = time.perf_counter()
+
+    # 3. Goi Anthropic Claude API
+    response = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    )
+
+    # 4. Tinh thoi gian phan hoi
+    latency = float(time.perf_counter() - start)
+
+    # 5. Lay noi dung AI tra loi
+    response_text = response.content[0].text
+
+    # 6. Lay thong tin token
+    usage = {
+        "input_tokens": response.usage.input_tokens,
+        "output_tokens": response.usage.output_tokens
+    }
+
+    # 7. Tra ve ket qua
+    return response_text, latency, usage
 
 
 # ---------------------------------------------------------------------------
@@ -174,13 +280,71 @@ def compare_models(prompt: str) -> dict:
             - "gpt4o_mini": { "response": str, "latency": float, "cost": float, "input_tokens": int, "output_tokens": int }
             - "gemini_flash": { "response": str, "latency": float, "cost": float, "input_tokens": int, "output_tokens": int }
     """
-    # TODO: Call call_openai with default gpt-4o model
-    # TODO: Call call_openai with gpt-4o-mini model
-    # TODO: Call call_gemini with default gemini-2.5-flash model
-    # TODO: Calculate costs exactly based on input and output token counts using PRICING_1M_TOKENS
-    #       Formula: Cost = (input_tokens * input_rate_per_1M + output_tokens * output_rate_per_1M) / 1,000,000
-    # TODO: Assemble and return the comparison dictionary.
-    raise NotImplementedError("Implement compare_models")
+    
+    # 1. Goi GPT-4o
+    gpt4o_text, gpt4o_latency, gpt4o_usage = call_openai(
+        prompt,
+        model=OPENAI_MODEL
+    )
+
+    # 2. Goi GPT-4o-mini
+    mini_text, mini_latency, mini_usage = call_openai(
+        prompt,
+        model=OPENAI_MINI_MODEL
+    )
+
+    # 3. Goi Gemini 2.5 Flash
+    gemini_text, gemini_latency, gemini_usage = call_gemini(
+        prompt,
+        model=GEMINI_MODEL
+    )
+
+    # 4. Ham ho tro tinh chi phi va tao ket qua
+    def make_stats(text, latency, usage, model_name):
+        prices = PRICING_1M_TOKENS[model_name]
+
+        input_tokens = usage["input_tokens"]
+        output_tokens = usage["output_tokens"]
+
+        cost = (
+            input_tokens * prices["input"]
+            + output_tokens * prices["output"]
+        ) / 1_000_000
+
+        return {
+            "response": text,
+            "latency": latency,
+            "cost": cost,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens
+        }
+
+    # 5. Tong hop ket qua so sanh
+    results = {
+        "gpt4o": make_stats(
+            gpt4o_text,
+            gpt4o_latency,
+            gpt4o_usage,
+            OPENAI_MODEL
+        ),
+
+        "gpt4o_mini": make_stats(
+            mini_text,
+            mini_latency,
+            mini_usage,
+            OPENAI_MINI_MODEL
+        ),
+
+        "gemini_flash": make_stats(
+            gemini_text,
+            gemini_latency,
+            gemini_usage,
+            GEMINI_MODEL
+        )
+    }
+
+    # 6. Tra ve ket qua
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +364,77 @@ def streaming_chatbot() -> None:
         - Check how to stream responses using client.chats or model.generate_content(..., stream=True).
         - Keep history limited to the last 3 turns to optimize context window and costs.
     """
-    # TODO: Setup interactive session, prompt user for input, stream response, and update history.
-    raise NotImplementedError("Implement streaming_chatbot")
+   
+    from google import genai
+    from google.genai import types
+
+    # Khoi tao Gemini Client
+    client = genai.Client(
+        api_key=os.getenv("GEMINI_API_KEY")
+    )
+
+    # Luu lich su hoi thoai
+    history = []
+
+    print("=== Gemini Streaming Chatbot ===")
+    print("Type 'quit' or 'exit' to stop.")
+
+    while True:
+        user_input = input("\nYou: ").strip()
+
+        # Thoat chatbot
+        if user_input.lower() in ["quit", "exit"]:
+            print("Goodbye!")
+            break
+
+        if not user_input:
+            continue
+
+        # Tao tin nhan nguoi dung
+        user_message = types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(text=user_input)
+            ]
+        )
+
+        # Ket hop lich su
+        formatted_history = history + [user_message]
+
+        # Goi API streaming
+        response_stream = client.models.generate_content_stream(
+            model=GEMINI_MODEL,
+            contents=formatted_history
+        )
+
+        print("AI: ", end="", flush=True)
+
+        response_parts = []
+
+        for chunk in response_stream:
+            if chunk.text:
+                print(chunk.text, end="", flush=True)
+                response_parts.append(chunk.text)
+
+        print()
+
+        # Luu cau tra loi hoan chinh
+        full_response = "".join(response_parts)
+
+        model_message = types.Content(
+            role="model",
+            parts=[
+                types.Part.from_text(text=full_response)
+            ]
+        )
+
+        # Cap nhat lich su
+        history.append(user_message)
+        history.append(model_message)
+
+        # Chi giu 3 luot hoi thoai gan nhat
+        history = history[-6:]
+
 
 
 # ---------------------------------------------------------------------------
@@ -227,8 +460,29 @@ def retry_with_backoff(
     Raises:
         The last exception raised by fn() after all retries are exhausted.
     """
-    # TODO: implement retry loop with exponential backoff
-    raise NotImplementedError("Implement retry_with_backoff")
+    
+    # Thu hien lan dau va cac lan thu lai
+    for attempt in range(max_retries + 1):
+
+        try:
+            # Goi ham can thuc hien
+            result = fn()
+
+            # Thanh cong thi tra ve ngay
+            return result
+
+        except Exception:
+
+            # Neu da het so lan thu lai
+            if attempt == max_retries:
+                raise
+
+            # Tinh thoi gian cho theo cap so nhan
+            delay = base_delay * (2 ** attempt)
+
+            # Cho truoc khi thu lai
+            time.sleep(delay)
+
 
 
 # ---------------------------------------------------------------------------
@@ -245,8 +499,28 @@ def batch_compare(prompts: list[str]) -> list[dict]:
         List of dicts, each being the compare_models result with an extra
         key "prompt" containing the original prompt string.
     """
-    # TODO: iterate over prompts, call compare_models, and inject the original "prompt".
-    raise NotImplementedError("Implement batch_compare")
+    
+    # Danh sach ket qua
+    all_results = []
+
+    # Duyet qua tung prompt
+    for prompt in prompts:
+
+        # So sanh cac model
+        comparison = compare_models(prompt)
+
+        # Them prompt goc vao ket qua
+        result = {
+            **comparison,
+            "prompt": prompt
+        }
+
+        # Luu vao danh sach
+        all_results.append(result)
+
+    # Tra ve tat ca ket qua
+    return all_results
+
 
 
 # ---------------------------------------------------------------------------
@@ -263,8 +537,57 @@ def format_comparison_table(results: list[dict]) -> str:
         A beautiful Markdown table string with columns:
         | Prompt | Model | Response (truncated) | Latency | Tokens (In/Out) | Cost (USD) |
     """
-    # TODO: Build and return the formatted table string. Truncate response to 50 chars for clean display.
-    raise NotImplementedError("Implement format_comparison_table")
+    
+    # 1. Tao tieu de bang Markdown
+    lines = [
+        "| Prompt | Model | Response (truncated) | Latency | Tokens (In/Out) | Cost (USD) |",
+        "|---|---|---|---:|---:|---:|"
+    ]
+
+    # 2. Ten hien thi cua cac model
+    model_names = {
+        "gpt4o": "GPT-4o",
+        "gpt4o_mini": "GPT-4o-mini",
+        "gemini_flash": "Gemini-Flash"
+    }
+
+    # 3. Duyet qua cac ket qua
+    for result in results:
+
+        prompt = str(result["prompt"])
+        prompt = prompt.replace("|", "\\|").replace("\n", " ")
+
+        # 4. Tao tung dong cho moi model
+        for model_key, model_name in model_names.items():
+
+            stats = result[model_key]
+
+            response = str(stats["response"])
+            response = response.replace("\n", " ")
+
+            # Gioi han noi dung trong 50 ky tu
+            if len(response) > 50:
+                response = response[:47] + "..."
+
+            response = response.replace("|", "\\|")
+
+            latency = stats["latency"]
+            input_tokens = stats["input_tokens"]
+            output_tokens = stats["output_tokens"]
+            cost = stats["cost"]
+
+            # 5. Tao dong Markdown
+            row = (
+                f"| {prompt} | {model_name} | {response} | "
+                f"{latency:.2f}s | "
+                f"{input_tokens}/{output_tokens} | "
+                f"${cost:.8f} |"
+            )
+
+            lines.append(row)
+
+    # 6. Ghep cac dong thanh bang
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
